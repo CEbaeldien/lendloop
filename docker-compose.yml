@@ -1,0 +1,35 @@
+# Local n8n for LendLoop's automations.
+#   cp n8n/.env.example n8n/.env   # then fill in the values
+#   docker compose up -d           # n8n at http://localhost:5678
+#   docker compose run --rm n8n-import
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.48.4
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    env_file: n8n/.env
+    environment:
+      # Code nodes need Node's crypto module for HMAC signing/verification.
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      # Code nodes read LENDLOOP_* settings from the environment ($env),
+      # so secrets live here and never in the exported workflow JSON.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      GENERIC_TIMEZONE: UTC
+      TZ: UTC
+      N8N_DIAGNOSTICS_ENABLED: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  # One-off: import the three workflows from n8n/workflows into the instance.
+  n8n-import:
+    image: docker.n8n.io/n8nio/n8n:2.48.4
+    profiles: ["tools"]
+    env_file: n8n/.env
+    entrypoint: ["n8n", "import:workflow", "--separate", "--input=/workflows"]
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+
+volumes:
+  n8n_data:

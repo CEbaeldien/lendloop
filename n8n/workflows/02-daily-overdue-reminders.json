@@ -1,0 +1,394 @@
+{
+  "name": "LendLoop · Daily overdue reminders",
+  "id": "LendLoopRemind01",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "0dc5d7c6-0b35-f74d-5eba-970370888ab4",
+      "name": "Every day at 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst secret = $env.LENDLOOP_WEBHOOK_SECRET;\nif (!secret) throw new Error('LENDLOOP_WEBHOOK_SECRET is not set in the n8n environment');\n// Same scheme as Convex: HMAC-SHA256 over \"timestamp.METHOD.path.body\", hex.\nfunction sign(method, path, body) {\n  const timestamp = Math.floor(Date.now() / 1000).toString();\n  const signature = crypto.createHmac('sha256', secret)\n    .update(timestamp + '.' + method + '.' + path + '.' + body).digest('hex');\n  return { timestamp, signature };\n}\nreturn [{ json: sign('GET', '/n8n/overdue-loans', '') }];"
+      },
+      "id": "b6a2bf99-4946-ff3a-91b6-c31a4a90ba03",
+      "name": "Sign fetch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONVEX_SITE_URL }}/n8n/overdue-loans",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "6526ad84-6356-fd76-0352-2f577787335f",
+      "name": "Fetch overdue loans",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const loans = $input.first().json.loans || [];\nreturn loans.map((l) => ({ json: {\n  to: l.borrower.email,\n  subject: 'Reminder: please return the ' + l.tool.name,\n  text: 'Hi ' + l.borrower.name + ',\\n\\nThe ' + l.tool.name + ' you borrowed from ' + l.lenderFirstName +\n    ' was due back on ' + l.endDate + ' (' + l.daysOverdue + ' day' + (l.daysOverdue === 1 ? '' : 's') +\n    ' ago). Please return it, or message ' + l.lenderFirstName + ' if you need longer.',\n  writeBack: { idempotencyKey: l.reminderKey, loanId: l.loanId, kind: 'overdue_reminder' },\n} }));"
+      },
+      "id": "07b2ff16-ac06-8431-2096-8c16a71b150d",
+      "name": "One item per loan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all();"
+      },
+      "id": "ec65d5c3-91fa-e2a3-0e46-74ade6b31d89",
+      "name": "Compose message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "81b7813a-98fe-ffae-d364-372a301b2191",
+              "leftValue": "={{ $env.NOTIFY_CHANNEL }}",
+              "rightValue": "smtp",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "965ab8a2-418c-4cfa-6e45-a1fcba13414c",
+      "name": "Use SMTP?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.NOTIFY_FROM_EMAIL }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "adbf5cc2-7ec8-0a3a-feae-18fa91ceca7f",
+      "name": "Send email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        200
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "LendLoop SMTP"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item) => {\n  console.log('[LendLoop notification] to=' + item.json.to + ' subject=' + JSON.stringify(item.json.subject));\n  return { json: { ...item.json, channel: 'log' } };\n});"
+      },
+      "id": "ab14b70a-0ef1-b738-a5c7-5c4a5f35b1f3",
+      "name": "Send (logged mock)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, i) => {\n  // The mock and the error branch carry the composed item through; the\n  // Email node's success output does not, so look up the paired input.\n  const src = item.json.writeBack ? item.json : $('Compose message').itemMatching(i).json;\n  const err = item.json.error ? String(item.json.error.message || item.json.error).slice(0, 200) : undefined;\n  return { json: { writeBack: { ...src.writeBack, status: 'sent', ...(err ? { detail: err } : {}) } } };\n});"
+      },
+      "id": "4e2c1476-29f6-daf2-c60b-2b3ec0698f62",
+      "name": "Mark sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, i) => {\n  // The mock and the error branch carry the composed item through; the\n  // Email node's success output does not, so look up the paired input.\n  const src = item.json.writeBack ? item.json : $('Compose message').itemMatching(i).json;\n  const err = item.json.error ? String(item.json.error.message || item.json.error).slice(0, 200) : undefined;\n  return { json: { writeBack: { ...src.writeBack, status: 'failed', ...(err ? { detail: err } : {}) } } };\n});"
+      },
+      "id": "5e743c8a-c027-8845-e12b-fd6354587372",
+      "name": "Mark failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst secret = $env.LENDLOOP_WEBHOOK_SECRET;\nif (!secret) throw new Error('LENDLOOP_WEBHOOK_SECRET is not set in the n8n environment');\n// Same scheme as Convex: HMAC-SHA256 over \"timestamp.METHOD.path.body\", hex.\nfunction sign(method, path, body) {\n  const timestamp = Math.floor(Date.now() / 1000).toString();\n  const signature = crypto.createHmac('sha256', secret)\n    .update(timestamp + '.' + method + '.' + path + '.' + body).digest('hex');\n  return { timestamp, signature };\n}\nconst path = '/n8n/automation-events';\nreturn $input.all().map((item) => {\n  const body = JSON.stringify(item.json.writeBack);\n  return { json: { body, ...sign('POST', path, body) } };\n});"
+      },
+      "id": "dae2bf98-a82f-695b-ae30-2692c3c7b425",
+      "name": "Sign write-back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONVEX_SITE_URL }}/n8n/automation-events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-LendLoop-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LendLoop-Signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "5810b13d-0fee-fa82-910a-4c7fe9572042",
+      "name": "Write back to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Every day at 09:00": {
+      "main": [
+        [
+          {
+            "node": "Sign fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign fetch": {
+      "main": [
+        [
+          {
+            "node": "Fetch overdue loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch overdue loans": {
+      "main": [
+        [
+          {
+            "node": "One item per loan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per loan": {
+      "main": [
+        [
+          {
+            "node": "Compose message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose message": {
+      "main": [
+        [
+          {
+            "node": "Use SMTP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use SMTP?": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send (logged mock)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send email": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send (logged mock)": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark sent": {
+      "main": [
+        [
+          {
+            "node": "Sign write-back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark failed": {
+      "main": [
+        [
+          {
+            "node": "Sign write-back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign write-back": {
+      "main": [
+        [
+          {
+            "node": "Write back to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LendLoopErrors01"
+  },
+  "pinData": {},
+  "tags": []
+}
