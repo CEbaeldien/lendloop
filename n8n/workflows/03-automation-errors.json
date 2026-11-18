@@ -5,7 +5,7 @@
   "nodes": [
     {
       "parameters": {},
-      "id": "76ee929a-be10-a0c1-e66f-4b39f91e75cb",
+      "id": "b513adf4-cc58-4fdc-5531-b3126c73a799",
       "name": "When a LendLoop workflow fails",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
@@ -18,7 +18,7 @@
       "parameters": {
         "jsCode": "const e = $input.first().json;\nconst summary = {\n  workflow: e.workflow && e.workflow.name,\n  executionId: e.execution && e.execution.id,\n  url: e.execution && e.execution.url,\n  failedNode: e.execution && e.execution.lastNodeExecuted,\n  message: e.execution && e.execution.error && e.execution.error.message,\n  at: new Date().toISOString(),\n};\n// Visible in the n8n execution list and container logs. Swap or extend with\n// a Slack/Email node to page someone.\nconsole.error('[LendLoop automation failed] ' + JSON.stringify(summary));\nreturn [{ json: summary }];"
       },
-      "id": "eee85a9a-833e-4433-eee2-786ebb2ea7dd",
+      "id": "ab14b70a-0ef1-b738-a5c7-5c4a5f35b1f3",
       "name": "Log the failure",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

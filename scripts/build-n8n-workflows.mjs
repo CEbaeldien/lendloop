@@ -116,8 +116,10 @@ return $input.all().map((item) => {
   } };
 });`;
 
-// Default channel: a logged mock (the brief allows it). Switch
-// NOTIFY_CHANNEL=smtp to route through the Email node instead.
+// The channel is a logged mock, which the brief allows: the message is
+// visible in the execution data and the n8n log. For real delivery, swap
+// this node for an Email (SMTP) or Slack node that uses an n8n credential;
+// the wiring around it (retries, error output, write-back) stays the same.
 const MOCK_SEND = String.raw`
 return $input.all().map((item) => {
   console.log('[LendLoop notification] to=' + item.json.to + ' subject=' + JSON.stringify(item.json.subject));
@@ -126,8 +128,8 @@ return $input.all().map((item) => {
 
 const MARK = (status) => String.raw`
 return $input.all().map((item, i) => {
-  // The mock and the error branch carry the composed item through; the
-  // Email node's success output does not, so look up the paired input.
+  // Both outputs of the send step carry the composed item through; fall
+  // back to the paired input in case a replacement node does not.
   const src = item.json.writeBack ? item.json : $('Compose message').itemMatching(i).json;
   const err = item.json.error ? String(item.json.error.message || item.json.error).slice(0, 200) : undefined;
   return { json: { writeBack: { ...src.writeBack, status: '${status}', ...(err ? { detail: err } : {}) } } };
@@ -206,51 +208,6 @@ const ifTrue = (name, field, position) => ({
   type: "n8n-nodes-base.if",
   typeVersion: 2.2,
   position,
-});
-
-const ifEnvSmtp = (position) => ({
-  parameters: {
-    conditions: {
-      options: { caseSensitive: true, leftValue: "", typeValidation: "loose", version: 2 },
-      conditions: [
-        {
-          id: id("1f000000"),
-          leftValue: "={{ $env.NOTIFY_CHANNEL }}",
-          rightValue: "smtp",
-          operator: { type: "string", operation: "equals" },
-        },
-      ],
-      combinator: "and",
-    },
-    options: {},
-  },
-  id: id("1f000000"),
-  name: "Use SMTP?",
-  type: "n8n-nodes-base.if",
-  typeVersion: 2.2,
-  position,
-});
-
-const email = (position) => ({
-  parameters: {
-    fromEmail: "={{ $env.NOTIFY_FROM_EMAIL }}",
-    toEmail: "={{ $json.to }}",
-    subject: "={{ $json.subject }}",
-    emailFormat: "text",
-    text: "={{ $json.text }}",
-    options: { appendAttribution: false },
-  },
-  id: id("e0a10000"),
-  name: "Send email",
-  type: "n8n-nodes-base.emailSend",
-  typeVersion: 2.1,
-  position,
-  // Credential is referenced by name only; create "LendLoop SMTP" in n8n.
-  credentials: { smtp: { id: "REPLACE_AFTER_IMPORT", name: "LendLoop SMTP" } },
-  retryOnFail: true,
-  maxTries: 3,
-  waitBetweenTries: 5000,
-  onError: "continueErrorOutput",
 });
 
 const signedHttp = (name, method, path, position, bodyExpr) => ({
@@ -334,9 +291,7 @@ const notifications = workflow(
     respond("Accept (200)", 200, [660, 200]),
     { ...ifTrue("Already handled?", "duplicate", [880, 200]) },
     code("Compose message", COMPOSE_NOTIFICATION, [1100, 280]),
-    ifEnvSmtp([1320, 280]),
-    email([1540, 180]),
-    code("Send (logged mock)", MOCK_SEND, [1540, 380]),
+    code("Send notification", MOCK_SEND, [1320, 280], { retryOnFail: true, maxTries: 3, waitBetweenTries: 5000, onError: "continueErrorOutput" }),
     code("Mark sent", MARK("sent"), [1760, 240]),
     code("Mark failed", MARK("failed"), [1760, 440]),
     code("Sign write-back", SIGN_WRITE_BACK, [1980, 300]),
@@ -349,10 +304,9 @@ const notifications = workflow(
     "Accept (200)": { main: [[link("Already handled?")]] },
     // true = duplicate delivery: stop here.
     "Already handled?": { main: [[], [link("Compose message")]] },
-    "Compose message": { main: [[link("Use SMTP?")]] },
-    "Use SMTP?": { main: [[link("Send email")], [link("Send (logged mock)")]] },
-    "Send email": { main: [[link("Mark sent")], [link("Mark failed")]] },
-    "Send (logged mock)": { main: [[link("Mark sent")]] },
+    "Compose message": { main: [[link("Send notification")]] },
+    // Output 0 = sent, output 1 = still failing after retries.
+    "Send notification": { main: [[link("Mark sent")], [link("Mark failed")]] },
     "Mark sent": { main: [[link("Sign write-back")]] },
     "Mark failed": { main: [[link("Sign write-back")]] },
     "Sign write-back": { main: [[link("Write back to Convex")]] },
@@ -377,9 +331,7 @@ const reminders = workflow(
     signedHttp("Fetch overdue loans", "GET", "/n8n/overdue-loans", [440, 300]),
     code("One item per loan", SPLIT_LOANS, [660, 300]),
     { ...code("Compose message", "return $input.all();", [880, 300]) },
-    ifEnvSmtp([1100, 300]),
-    email([1320, 200]),
-    code("Send (logged mock)", MOCK_SEND, [1320, 400]),
+    code("Send notification", MOCK_SEND, [1100, 300], { retryOnFail: true, maxTries: 3, waitBetweenTries: 5000, onError: "continueErrorOutput" }),
     code("Mark sent", MARK("sent"), [1540, 260]),
     code("Mark failed", MARK("failed"), [1540, 460]),
     code("Sign write-back", SIGN_WRITE_BACK, [1760, 300]),
@@ -390,10 +342,9 @@ const reminders = workflow(
     "Sign fetch": { main: [[link("Fetch overdue loans")]] },
     "Fetch overdue loans": { main: [[link("One item per loan")]] },
     "One item per loan": { main: [[link("Compose message")]] },
-    "Compose message": { main: [[link("Use SMTP?")]] },
-    "Use SMTP?": { main: [[link("Send email")], [link("Send (logged mock)")]] },
-    "Send email": { main: [[link("Mark sent")], [link("Mark failed")]] },
-    "Send (logged mock)": { main: [[link("Mark sent")]] },
+    "Compose message": { main: [[link("Send notification")]] },
+    // Output 0 = sent, output 1 = still failing after retries.
+    "Send notification": { main: [[link("Mark sent")], [link("Mark failed")]] },
     "Mark sent": { main: [[link("Sign write-back")]] },
     "Mark failed": { main: [[link("Sign write-back")]] },
     "Sign write-back": { main: [[link("Write back to Convex")]] },

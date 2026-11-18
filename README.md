@@ -125,7 +125,7 @@ sent as `X-LendLoop-Timestamp` and `X-LendLoop-Signature`. Including the method 
 | Write-back retried | `POST /n8n/automation-events` is idempotent on `idempotencyKey` (`notification:<deliveryId>`, `reminder:<loanId>:<date>`). A repeat is a no-op; a later `sent` upgrades an earlier `failed`; a `failed` never overwrites a `sent`. |
 | Reminder workflow re-run on the same day | `GET /n8n/overdue-loans` leaves out loans that already have a successful reminder for today. |
 
-Notifications go to a logged mock channel by default (`NOTIFY_CHANNEL=log`, visible in the n8n execution and container log). Set `NOTIFY_CHANNEL=smtp` and create an SMTP credential named **LendLoop SMTP** to send real email.
+The send step is a logged mock, which the brief allows: each message (recipient, subject, body) is visible in the n8n execution data. For real delivery, replace the *Send notification* node with an Email (SMTP) or Slack node that uses an n8n credential; the retries, error output and write-back around it stay as they are. The workflows deliberately reference no credential, so they import and activate with no manual setup.
 
 ## Local setup
 
@@ -164,7 +164,7 @@ docker compose up -d n8n
 docker compose run --rm n8n-import
 ```
 
-Open http://localhost:5678, then activate *LendLoop · Loan request notifications* and *LendLoop · Daily overdue reminders*. The error workflow needs no activation.
+Open http://localhost:5678, then publish (activate) *LendLoop · Loan request notifications* and *LendLoop · Daily overdue reminders*. The error workflow needs no activation. From the CLI: `docker compose exec n8n n8n publish:workflow --id=LendLoopNotify01` and the same for `LendLoopRemind01`.
 
 Convex has to reach n8n's webhook. A Convex cloud deployment can't call `localhost`, so expose port 5678 with a tunnel (for example `cloudflared tunnel --url http://localhost:5678`) or use n8n Cloud, then:
 
@@ -188,10 +188,9 @@ Until `N8N_REQUEST_WEBHOOK_URL` is set, events are stored and marked `skipped`, 
 | `n8n/.env` | `LENDLOOP_WEBHOOK_SECRET` | Same shared secret. |
 | `n8n/.env` | `CONVEX_SITE_URL` | Convex HTTP Actions URL (`.convex.site`). |
 | `n8n/.env` | `LENDLOOP_REQUEST_WEBHOOK_PATH` | Path Convex signs; default `/webhook/lendloop-loan-events`. |
-| `n8n/.env` | `NOTIFY_CHANNEL`, `NOTIFY_FROM_EMAIL` | `log` (mock) or `smtp`. |
 | `n8n/.env` | `N8N_ENCRYPTION_KEY` | Encrypts n8n's stored credentials. |
 
-Templates: `.env.example` and `n8n/.env.example`. Real env files are git-ignored. No secret appears in code or in the exported workflow JSON: the workflows read `$env` at run time, and the SMTP credential is referenced by name.
+Templates: `.env.example` and `n8n/.env.example`. Real env files are git-ignored. No secret appears in code or in the exported workflow JSON: the workflows read `$env` at run time.
 
 ## Tests
 
@@ -202,6 +201,15 @@ npm run lint
 ```
 
 The tests cover the rules that matter most: roles come from the server; signed-out callers are rejected; users can't edit or delete other people's listings; only owners decide on requests; only lenders (or admins) mark returns; admin-only functions reject users; the public list exposes name and category only; date and overlap rules; the outbox body is minimal, signed and verifiable; failed deliveries retry five times and end visible as `failed`; write-backs are idempotent (and upgrade failed → sent, never the reverse); reminders already sent today drop out of the next fetch; and the signature check rejects tampered bodies, wrong paths, wrong secrets and stale timestamps.
+
+### End-to-end check
+
+Run locally against a real Convex backend and n8n 2.48.4 (the version pinned in `docker-compose.yml`):
+
+- A borrow request created a delivery in Convex, n8n verified the signature and answered 200, sent the (mock) notification and wrote `sent` back; the delivery and the write-back both show in Convex.
+- The reminder workflow fetched the overdue loan, sent one reminder and wrote it back; running it again the same day fetched nothing.
+- Calling the n8n webhook directly: a valid call returned 200; the same delivery id again returned 200 but sent nothing and wrote nothing new; a tampered body, a 15-minute-old timestamp and an unsigned call each returned 401.
+- In the browser: list a tool, request it as another user, approve it, see it on loan; a non-admin opening `/admin` sees nothing; the admin page shows loans, webhook states and the Trusted Lender toggle.
 
 ## Security and data-minimisation decisions
 
@@ -218,7 +226,7 @@ The tests cover the rules that matter most: roles come from the server; signed-o
 ## What I would change for production
 
 - **Delivery state in n8n.** Workflow static data is per-workflow and fine for one instance; at scale I'd keep processed delivery ids in a small table (or check Convex's `automationEvents` before sending) so dedupe survives restores and multiple workers.
-- **Real email and templates**: SMTP or a provider node with a credential, branded HTML templates, an unsubscribe for reminders, and quiet hours by the borrower's timezone (dates are UTC today).
+- **Real email and templates**: swap the mock for SMTP or a provider node with a credential, branded HTML templates, an unsubscribe for reminders, and quiet hours by the borrower's timezone (dates are UTC today).
 - **Admin bootstrap through Clerk.** Move roles to Clerk organisation roles or public metadata, carried as a JWT claim, instead of an email list.
 - **Observability**: send the error workflow's output and Convex failed deliveries to Sentry or Slack, with an alert when a delivery fails; add structured logs with request ids that span Convex and n8n.
 - **Secret rotation**: support two active secrets during rotation (try current, then previous) and rotate on a schedule.

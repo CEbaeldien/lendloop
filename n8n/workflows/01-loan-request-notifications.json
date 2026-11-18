@@ -152,62 +152,16 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "338e16a9-6ed6-b5b9-54de-857e0ea13918",
-              "leftValue": "={{ $env.NOTIFY_CHANNEL }}",
-              "rightValue": "smtp",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
+        "jsCode": "return $input.all().map((item) => {\n  console.log('[LendLoop notification] to=' + item.json.to + ' subject=' + JSON.stringify(item.json.subject));\n  return { json: { ...item.json, channel: 'log' } };\n});"
       },
-      "id": "da3f7356-3508-a8b5-1df2-45c246ae56d2",
-      "name": "Use SMTP?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
+      "id": "293c5ee5-494f-b558-1a33-20f8c005950b",
+      "name": "Send notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         1320,
         280
-      ]
-    },
-    {
-      "parameters": {
-        "fromEmail": "={{ $env.NOTIFY_FROM_EMAIL }}",
-        "toEmail": "={{ $json.to }}",
-        "subject": "={{ $json.subject }}",
-        "emailFormat": "text",
-        "text": "={{ $json.text }}",
-        "options": {
-          "appendAttribution": false
-        }
-      },
-      "id": "e638db10-7ac5-7b3d-3198-19952ac1b404",
-      "name": "Send email",
-      "type": "n8n-nodes-base.emailSend",
-      "typeVersion": 2.1,
-      "position": [
-        1540,
-        180
       ],
-      "credentials": {
-        "smtp": {
-          "id": "REPLACE_AFTER_IMPORT",
-          "name": "LendLoop SMTP"
-        }
-      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -215,22 +169,9 @@
     },
     {
       "parameters": {
-        "jsCode": "return $input.all().map((item) => {\n  console.log('[LendLoop notification] to=' + item.json.to + ' subject=' + JSON.stringify(item.json.subject));\n  return { json: { ...item.json, channel: 'log' } };\n});"
+        "jsCode": "return $input.all().map((item, i) => {\n  // Both outputs of the send step carry the composed item through; fall\n  // back to the paired input in case a replacement node does not.\n  const src = item.json.writeBack ? item.json : $('Compose message').itemMatching(i).json;\n  const err = item.json.error ? String(item.json.error.message || item.json.error).slice(0, 200) : undefined;\n  return { json: { writeBack: { ...src.writeBack, status: 'sent', ...(err ? { detail: err } : {}) } } };\n});"
       },
-      "id": "2e50bdfc-61b8-7a19-60e6-978f92301a03",
-      "name": "Send (logged mock)",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1540,
-        380
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return $input.all().map((item, i) => {\n  // The mock and the error branch carry the composed item through; the\n  // Email node's success output does not, so look up the paired input.\n  const src = item.json.writeBack ? item.json : $('Compose message').itemMatching(i).json;\n  const err = item.json.error ? String(item.json.error.message || item.json.error).slice(0, 200) : undefined;\n  return { json: { writeBack: { ...src.writeBack, status: 'sent', ...(err ? { detail: err } : {}) } } };\n});"
-      },
-      "id": "0fc5d81a-312f-8df7-fc3e-1490ff384dd5",
+      "id": "7e5d0382-c02c-6139-d08a-8ac8e675608f",
       "name": "Mark sent",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -241,9 +182,9 @@
     },
     {
       "parameters": {
-        "jsCode": "return $input.all().map((item, i) => {\n  // The mock and the error branch carry the composed item through; the\n  // Email node's success output does not, so look up the paired input.\n  const src = item.json.writeBack ? item.json : $('Compose message').itemMatching(i).json;\n  const err = item.json.error ? String(item.json.error.message || item.json.error).slice(0, 200) : undefined;\n  return { json: { writeBack: { ...src.writeBack, status: 'failed', ...(err ? { detail: err } : {}) } } };\n});"
+        "jsCode": "return $input.all().map((item, i) => {\n  // Both outputs of the send step carry the composed item through; fall\n  // back to the paired input in case a replacement node does not.\n  const src = item.json.writeBack ? item.json : $('Compose message').itemMatching(i).json;\n  const err = item.json.error ? String(item.json.error.message || item.json.error).slice(0, 200) : undefined;\n  return { json: { writeBack: { ...src.writeBack, status: 'failed', ...(err ? { detail: err } : {}) } } };\n});"
       },
-      "id": "71acd717-2df0-7d0b-ebc8-01bf42d1b382",
+      "id": "3107f0d2-31fa-6f1a-13ac-0da8d2aabb1d",
       "name": "Mark failed",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -256,7 +197,7 @@
       "parameters": {
         "jsCode": "const crypto = require('crypto');\nconst secret = $env.LENDLOOP_WEBHOOK_SECRET;\nif (!secret) throw new Error('LENDLOOP_WEBHOOK_SECRET is not set in the n8n environment');\n// Same scheme as Convex: HMAC-SHA256 over \"timestamp.METHOD.path.body\", hex.\nfunction sign(method, path, body) {\n  const timestamp = Math.floor(Date.now() / 1000).toString();\n  const signature = crypto.createHmac('sha256', secret)\n    .update(timestamp + '.' + method + '.' + path + '.' + body).digest('hex');\n  return { timestamp, signature };\n}\nconst path = '/n8n/automation-events';\nreturn $input.all().map((item) => {\n  const body = JSON.stringify(item.json.writeBack);\n  return { json: { body, ...sign('POST', path, body) } };\n});"
       },
-      "id": "219c56b8-b815-acab-f908-a1c78b03b75f",
+      "id": "2e50bdfc-61b8-7a19-60e6-978f92301a03",
       "name": "Sign write-back",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -290,7 +231,7 @@
           "timeout": 10000
         }
       },
-      "id": "d5e083cf-f298-504c-9887-b6381cd6abf9",
+      "id": "a6fb4f5a-1291-540d-613c-5141f6e39a30",
       "name": "Write back to Convex",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -371,32 +312,14 @@
       "main": [
         [
           {
-            "node": "Use SMTP?",
+            "node": "Send notification",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Use SMTP?": {
-      "main": [
-        [
-          {
-            "node": "Send email",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Send (logged mock)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Send email": {
+    "Send notification": {
       "main": [
         [
           {
@@ -408,17 +331,6 @@
         [
           {
             "node": "Mark failed",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Send (logged mock)": {
-      "main": [
-        [
-          {
-            "node": "Mark sent",
             "type": "main",
             "index": 0
           }
