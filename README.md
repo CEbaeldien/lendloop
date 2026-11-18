@@ -174,6 +174,10 @@ npx convex env set N8N_REQUEST_WEBHOOK_URL https://<tunnel-host>/webhook/lendloo
 
 Until `N8N_REQUEST_WEBHOOK_URL` is set, events are stored and marked `skipped`, so the app works without n8n.
 
+### Deploying (Vercel + Convex)
+
+`vercel.json` sets the build command to `npx convex deploy --cmd 'npm run build'`: each Vercel build pushes the Convex functions to the production deployment, then builds Next.js with `NEXT_PUBLIC_CONVEX_URL` pointing at it. In Vercel, set `CONVEX_DEPLOY_KEY` (Convex dashboard → production deployment → Settings → Deploy key), `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. On the Convex production deployment, set `CLERK_JWT_ISSUER_DOMAIN` and `ADMIN_EMAILS` (and the n8n variables if you connect n8n).
+
 ## Environment variables
 
 | Where | Name | Purpose |
