@@ -6,7 +6,11 @@ A neighbourhood tool-lending board. Neighbours list tools, request to borrow the
 
 Stack: Next.js 16 (App Router) · Clerk · Convex · n8n · TypeScript.
 
-![Board](docs/screenshots/board.png)
+| Public page | Board (signed in) |
+|---|---|
+| ![Public page](docs/screenshots/public.png) | ![Board](docs/screenshots/board.png) |
+| **Incoming requests** | **Admin** |
+| ![Incoming requests](docs/screenshots/incoming.png) | ![Admin](docs/screenshots/admin.png) |
 
 ---
 
