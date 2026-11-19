@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Show, SignInButton, UserButton } from "@clerk/nextjs";
+import { InstallButton } from "./Pwa";
 
 export default function Header({ isAdmin = false }: { isAdmin?: boolean }) {
   return (
@@ -12,6 +13,7 @@ export default function Header({ isAdmin = false }: { isAdmin?: boolean }) {
           LendLoop
         </Link>
         <nav className="flex items-center gap-2 text-sm">
+          <InstallButton />
           <Show when="signed-in">
             <Link href="/app" className="btn btn-quiet">Board</Link>
             {isAdmin && <Link href="/admin" className="btn btn-quiet">Admin</Link>}

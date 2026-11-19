@@ -19,11 +19,12 @@ Stack: Next.js 16 (App Router) · Clerk · Convex · n8n · TypeScript.
 1. [Architecture](#architecture)
 2. [Roles and access control](#roles-and-access-control)
 3. [Automations (n8n)](#automations-n8n)
-4. [Local setup](#local-setup)
-5. [Environment variables](#environment-variables)
-6. [Tests](#tests)
-7. [Security and data-minimisation decisions](#security-and-data-minimisation-decisions)
-8. [What I would change for production](#what-i-would-change-for-production)
+4. [Installable app (PWA)](#installable-app-pwa)
+5. [Local setup](#local-setup)
+6. [Environment variables](#environment-variables)
+7. [Tests](#tests)
+8. [Security and data-minimisation decisions](#security-and-data-minimisation-decisions)
+9. [What I would change for production](#what-i-would-change-for-production)
 
 ---
 
@@ -126,6 +127,19 @@ sent as `X-LendLoop-Timestamp` and `X-LendLoop-Signature`. Including the method 
 | Reminder workflow re-run on the same day | `GET /n8n/overdue-loans` leaves out loans that already have a successful reminder for today. |
 
 The send step is a logged mock, which the brief allows: each message (recipient, subject, body) is visible in the n8n execution data. For real delivery, replace the *Send notification* node with an Email (SMTP) or Slack node that uses an n8n credential; the retries, error output and write-back around it stay as they are. The workflows deliberately reference no credential, so they import and activate with no manual setup.
+
+## Installable app (PWA)
+
+LendLoop installs like an app from the browser: "Install app" in the header on Chrome, Edge and Android, or *Share → Add to Home Screen* on iPhone. It opens in its own window, straight onto the board.
+
+| Piece | File | What it does |
+|---|---|---|
+| Manifest | `app/manifest.ts` (served at `/manifest.webmanifest`) | Name, icons (including a maskable icon for Android), colours, `start_url: /app`, standalone display |
+| Service worker | `public/sw.js` | Precaches the offline page and icons; caches content-hashed `/_next/static/` assets cache-first; falls back to the offline page when a navigation fails |
+| Offline page | `public/offline.html` | Self-contained page shown with no connection; reloads itself when the connection returns |
+| Runtime | `components/Pwa.tsx` | Registers the service worker in production builds, shows an offline banner, and offers the install button only when the browser supports it |
+
+What the service worker deliberately does **not** cache: pages, Convex data and Clerk sign-in. Nothing about anyone's tools, loans or account is stored on the device, and every request to Convex or Clerk goes straight to the network. `/sw.js` is served with `no-store` so updates reach installed apps immediately.
 
 ## Local setup
 
